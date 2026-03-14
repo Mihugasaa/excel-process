@@ -4,3 +4,4 @@ numpy
 xlsxwriter
 plotly
 openpyxl
+python-calamine
