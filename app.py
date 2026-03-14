@@ -174,20 +174,20 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
 
     st.markdown("---")
     
-    st.subheader("📥 1. Archivo Procesado Maestro")
+    st.subheader("📥 1. Archivo Procesado")
     nombre_base = st.session_state.get('nombre_original', 'archivo').rsplit('.', 1)[0]
     
     col_desc1, col_desc2 = st.columns(2)
     with col_desc1:
         st.download_button(
-            label="Descargar Dataset Completo (CSV)",
+            label="Descargar Dataset (CSV)",
             data=st.session_state['csv_maestro'],
             file_name=f"resultado_{nombre_base}.csv",
             mime="text/csv"
         )
     with col_desc2:
         st.download_button(
-            label="Descargar Dataset Completo (Excel)",
+            label="Descargar Dataset (Excel)",
             data=st.session_state['excel_maestro'],
             file_name=f"resultado_{nombre_base}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
