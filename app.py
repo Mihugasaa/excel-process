@@ -8,7 +8,7 @@ import plotly.express as px
 st.set_page_config(page_title="Dashboard Analítico de Precios", layout="wide")
 
 st.title("Procesador y Dashboard de Precios")
-st.write("Sube tu archivo para estructurar los datos, rellenar vacíos temporales y explorar el comportamiento de los precios.")
+st.write("Sube tu archivo para estructurar los datos y explorar el comportamiento de los precios.")
 
 # Inicializar variables en session_state para mantener los datos al usar filtros
 if 'df_final' not in st.session_state:
@@ -77,7 +77,7 @@ if uploaded_file is not None and st.session_state['df_final'] is None:
             progress_bar.progress(60)
 
             # --- FASE 4: Interpolación (Regla de Máximo 15 días) ---
-            status_text.text("Fase 4/5: Generando días faltantes (Máx 15 días por salto)...")
+            status_text.text("Fase 4/5: Generando días faltantes...")
             if not gaps.empty:
                 # Limitamos la creación de nuevas filas a un máximo de 15 días
                 gaps['num_new_rows'] = (gaps['days_diff'] - 1).astype(np.float64).clip(upper=15).astype(np.int32)
