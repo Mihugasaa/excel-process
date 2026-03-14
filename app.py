@@ -135,11 +135,11 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
 
     st.markdown("---")
     
-    st.subheader("📥 1. Archivo Maestro Procesado")
+    st.subheader("📥 1. Archivo Procesado")
     columnas_exportacion = [col for col in df_analisis.columns if col != 'FECHA_REGISTRO_DT']
     df_para_exportar = df_analisis[columnas_exportacion]
     
-    with st.spinner("Preparando archivos maestros para descarga..."):
+    with st.spinner("Preparando archivos organizados para descarga..."):
         csv_data = convert_df_to_csv(df_para_exportar)
         excel_data = convert_df_to_excel(df_para_exportar)
     
