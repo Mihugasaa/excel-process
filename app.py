@@ -282,7 +282,7 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
         with st.form("form_filtros_grafica"):
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                # 1. Preparamos la lista combinada de todas las ubicaciones con prefijos
+                # Preparamos la lista combinada de todas las ubicaciones con prefijos
                 depas = ["Dep: " + str(d) for d in df_analisis['NOMDEPA'].dropna().unique()]
                 provs = ["Prov: " + str(p) for p in df_analisis['NOMPROV'].dropna().unique()]
                 dists = ["Dist: " + str(d) for d in df_analisis['NOMDIST'].dropna().unique()]
@@ -309,7 +309,7 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                 with st.spinner("Analizando tendencias comparativas..."):
                     df_plot_list = []
                     
-                    # 2. Iteramos sobre los lugares seleccionados para extraer y etiquetar su data
+                    # Iteramos sobre los lugares seleccionados
                     for loc in ubicaciones_sel:
                         if loc.startswith("Dep: "):
                             temp_df = df_analisis[df_analisis['NOMDEPA'] == loc.replace("Dep: ", "")].copy()
@@ -319,14 +319,12 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                             temp_df = df_analisis[df_analisis['NOMDIST'] == loc.replace("Dist: ", "")].copy()
                         
                         if not temp_df.empty:
-                            temp_df['LUGAR_COMPARACION'] = loc # Etiqueta clave para la gráfica
+                            temp_df['LUGAR_COMPARACION'] = loc # Etiqueta clave
                             df_plot_list.append(temp_df)
                     
                     if df_plot_list:
-                        # Unimos todos los sub-dataframes
                         df_filtrado_graf = pd.concat(df_plot_list, ignore_index=True)
                         
-                        # Filtramos por los productos y fechas seleccionados
                         mask_graf = (
                             (df_filtrado_graf['DESCRIPCION_PRODUCTO'].isin(prods_sel_graf)) &
                             (df_filtrado_graf['FECHA_REGISTRO_DT'].dt.date >= start_date_g) &
@@ -337,7 +335,6 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                         if not df_filtrado_graf.empty:
                             df_filtrado_graf.set_index('FECHA_REGISTRO_DT', inplace=True)
                             
-                            # 3. Agrupamos por el nuevo Lugar y Producto
                             df_resampled = df_filtrado_graf.groupby(['LUGAR_COMPARACION', 'DESCRIPCION_PRODUCTO'], observed=True)['PRECIO_VENTA'].resample(freq).mean().reset_index()
                             df_resampled.dropna(subset=['PRECIO_VENTA'], inplace=True)
                             
@@ -346,13 +343,23 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                             else:
                                 df_resampled['Periodo'] = df_resampled['FECHA_REGISTRO_DT']
 
-                            # 4. Creamos una leyenda única para que Plotly dibuje líneas separadas
+                            # Creamos la leyenda unificada
                             df_resampled['LEYENDA'] = df_resampled['LUGAR_COMPARACION'] + " | " + df_resampled['DESCRIPCION_PRODUCTO'].astype(str)
+                            
+                            # --- NUEVO: Redondeamos el precio a 2 decimales para la etiqueta visual ---
+                            df_resampled['PRECIO_LABEL'] = df_resampled['PRECIO_VENTA'].round(2)
 
+                            # --- NUEVO: Añadimos 'text' a la gráfica ---
                             fig = px.line(
                                 df_resampled, x='Periodo', y='PRECIO_VENTA', color='LEYENDA',
-                                markers=True, title="Evolución Comparativa de Precios por Ubicación"
+                                markers=True, text='PRECIO_LABEL', title="Evolución Comparativa de Precios por Ubicación"
                             )
+                            
+                            # --- NUEVO: Forzamos la posición del texto arriba del punto ---
+                            fig.update_traces(textposition="top center")
+                            # Añadimos un pequeño margen superior a la gráfica para que los números más altos no se corten
+                            fig.update_layout(margin=dict(t=50))
+
                             st.session_state['figura_grafica'] = fig
                         else:
                             st.session_state['figura_grafica'] = None
