@@ -146,14 +146,14 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
     col_desc1, col_desc2 = st.columns(2)
     with col_desc1:
         st.download_button(
-            label="Descargar Dataset (CSV - Rápido)",
+            label="Descargar Dataset (CSV)",
             data=csv_data,
             file_name="dataset_procesado_interpolado.csv",
             mime="text/csv"
         )
     with col_desc2:
         st.download_button(
-            label="Descargar Dataset (Excel - Lento)",
+            label="Descargar Dataset (Excel)",
             data=excel_data,
             file_name="dataset_procesado_interpolado.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
