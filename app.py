@@ -163,7 +163,7 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
 
     tab1, tab2 = st.tabs(["📊 Tabla de Promedios (Por Grifo)", "📈 Gráfica de Evolución (Por Departamento)"])
 
-    # === PESTAÑA 1: TABLA ===
+# === PESTAÑA 1: TABLA ===
     with tab1:
         with st.form("form_filtros_tabla"):
             col1, col2, col3 = st.columns(3)
@@ -184,7 +184,6 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
             if grifos_sel and prods_sel and len(rango_fechas_tabla) == 2:
                 start_date, end_date = rango_fechas_tabla
                 
-                # --- AQUÍ LA MEJORA: Calculamos todo dentro del spinner ---
                 with st.spinner("Calculando promedios y estructurando descargas..."):
                     mask_tabla = (
                         (df_analisis['CODIGO_OSINERG'].isin(grifos_sel)) & 
@@ -195,15 +194,22 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                     df_filtrado_tabla = df_analisis[mask_tabla]
                     
                     if not df_filtrado_tabla.empty:
+                        # --- NUEVA LÓGICA DE AGRUPACIÓN MULTIPLE ---
                         df_promedio = df_filtrado_tabla.groupby(
-                            ['FECHA_REGISTRO', 'FECHA_REGISTRO_DT', 'CODIGO_OSINERG', 'DESCRIPCION_PRODUCTO'], 
+                            ['FECHA_REGISTRO', 'FECHA_REGISTRO_DT', 'DESCRIPCION_PRODUCTO'], 
                             observed=True
-                        )['PRECIO_VENTA'].mean().reset_index()
+                        ).agg(
+                            PRECIO_PROMEDIO=('PRECIO_VENTA', 'mean'),
+                            CODIGO_OSINERG=('CODIGO_OSINERG', lambda x: ', '.join(sorted(set(x.dropna().astype(str)))))
+                        ).reset_index()
                         
+                        # Ordenamos por fecha y limpiamos
                         df_promedio = df_promedio.sort_values('FECHA_REGISTRO_DT').drop(columns=['FECHA_REGISTRO_DT'])
-                        df_promedio.rename(columns={'PRECIO_VENTA': 'PRECIO_PROMEDIO'}, inplace=True)
                         
-                        # Guardamos el DF y las descargas en memoria instantáneamente
+                        # Reordenamos las columnas para que tenga sentido visualmente
+                        df_promedio = df_promedio[['FECHA_REGISTRO', 'CODIGO_OSINERG', 'DESCRIPCION_PRODUCTO', 'PRECIO_PROMEDIO']]
+                        
+                        # Guardamos en sesión
                         st.session_state['df_promedio'] = df_promedio
                         st.session_state['csv_promedio'] = convert_df_to_csv(df_promedio)
                         st.session_state['excel_promedio'] = convert_df_to_excel(df_promedio)
@@ -222,7 +228,7 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
             with col_dl1:
                 st.download_button(
                     label="Descargar Promedios (CSV)",
-                    data=st.session_state['csv_promedio'], # Carga directa
+                    data=st.session_state['csv_promedio'], 
                     file_name="tabla_promedios.csv",
                     mime="text/csv",
                     key="dl_prom_csv"
@@ -230,7 +236,7 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
             with col_dl2:
                 st.download_button(
                     label="Descargar Promedios (Excel)",
-                    data=st.session_state['excel_promedio'], # Carga directa
+                    data=st.session_state['excel_promedio'], 
                     file_name="tabla_promedios.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="dl_prom_excel"
