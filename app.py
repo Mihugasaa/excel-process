@@ -11,6 +11,7 @@ st.set_page_config(page_title="Dashboard Analítico de Precios", layout="wide")
 st.title("Procesador y Dashboard de Precios")
 st.write("Sube tu archivo para estructurar los datos y explorar el comportamiento de los precios.")
 
+# --- HELPERS (Software Engineering) ---
 @st.cache_data(show_spinner=False)
 def convert_df_to_excel(df):
     output = io.BytesIO()
@@ -21,6 +22,30 @@ def convert_df_to_excel(df):
 @st.cache_data(show_spinner=False)
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
+
+def filtrar_por_ubicacion(df, lista_ubicaciones):
+    """Optimización (Data Science): Filtra vectorialmente en lugar de hacer múltiples copies en un for-loop."""
+    depas = [loc.replace("Dep: ", "") for loc in lista_ubicaciones if loc.startswith("Dep: ")]
+    provs = [loc.replace("Prov: ", "") for loc in lista_ubicaciones if loc.startswith("Prov: ")]
+    dists = [loc.replace("Dist: ", "") for loc in lista_ubicaciones if loc.startswith("Dist: ")]
+    
+    dfs_filtrados = []
+    if depas:
+        temp = df[df['NOMDEPA'].isin(depas)].copy()
+        temp['UBICACION'] = "Dep: " + temp['NOMDEPA'].astype(str)
+        dfs_filtrados.append(temp)
+    if provs:
+        temp = df[df['NOMPROV'].isin(provs)].copy()
+        temp['UBICACION'] = "Prov: " + temp['NOMPROV'].astype(str)
+        dfs_filtrados.append(temp)
+    if dists:
+        temp = df[df['NOMDIST'].isin(dists)].copy()
+        temp['UBICACION'] = "Dist: " + temp['NOMDIST'].astype(str)
+        dfs_filtrados.append(temp)
+        
+    if dfs_filtrados:
+        return pd.concat(dfs_filtrados, ignore_index=True)
+    return pd.DataFrame()
 
 # --- FUNCIÓN DE PROCESAMIENTO ---
 def procesar_archivo(file_buffer, file_name, progress_bar, status_text):
@@ -110,12 +135,10 @@ if uploaded_file is not None:
             progress_bar = st.progress(0)
             status_text = st.empty()
             try:
-                # 1. Procesamiento matemático
                 df_procesado = procesar_archivo(uploaded_file, uploaded_file.name, progress_bar, status_text)
                 st.session_state['df_final'] = df_procesado
                 st.session_state['nombre_original'] = uploaded_file.name 
                 
-                # 2. Generación de archivos de descarga antes de reiniciar la interfaz
                 status_text.text("Fase Extra: Comprimiendo archivos para descarga (Esto tomará unos segundos)...")
                 progress_bar.progress(85)
                 
@@ -151,36 +174,33 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
 
     st.markdown("---")
     
-    st.subheader("📥 1. Archivo Procesado")
-    
+    st.subheader("📥 1. Archivo Procesado Maestro")
     nombre_base = st.session_state.get('nombre_original', 'archivo').rsplit('.', 1)[0]
-    nombre_csv = f"resultado_{nombre_base}.csv"
-    nombre_excel = f"resultado_{nombre_base}.xlsx"
     
     col_desc1, col_desc2 = st.columns(2)
     with col_desc1:
         st.download_button(
-            label="Descargar Dataset (CSV)",
+            label="Descargar Dataset Completo (CSV)",
             data=st.session_state['csv_maestro'],
-            file_name=nombre_csv,
+            file_name=f"resultado_{nombre_base}.csv",
             mime="text/csv"
         )
     with col_desc2:
         st.download_button(
-            label="Descargar Dataset (Excel)",
+            label="Descargar Dataset Completo (Excel)",
             data=st.session_state['excel_maestro'],
-            file_name=nombre_excel,
+            file_name=f"resultado_{nombre_base}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
     st.markdown("---")
+    st.subheader("📊 2. Módulo de Análisis")
+    tab1, tab2 = st.tabs(["Tabla de Promedios", "Gráfica de Evolución de Precios"])
 
-    tab1, tab2 = st.tabs(["📊 Tabla de Promedios", "📈 Gráfica de Evolución de Precios"])
-
-# === PESTAÑA 1: TABLA ===
+    # === PESTAÑA 1: TABLA ===
     with tab1:
         with st.form("form_filtros_tabla"):
-            st.markdown("**1. Selecciona las ubicaciones a comparar:**")
+            st.markdown("**A. Selecciona las ubicaciones:**")
             col_loc1, col_loc2, col_loc3 = st.columns(3)
             with col_loc1:
                 depas_sel_t = st.multiselect("Departamentos:", sorted(df_analisis['NOMDEPA'].dropna().unique()))
@@ -189,43 +209,28 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
             with col_loc3:
                 dists_sel_t = st.multiselect("Distritos:", sorted(df_analisis['NOMDIST'].dropna().unique()))
 
-            st.markdown("**2. Selecciona parámetros de análisis:**")
+            st.markdown("**B. Selecciona parámetros del producto:**")
             col_param1, col_param2 = st.columns(2)
             with col_param1:
-                prods_disp = df_analisis['DESCRIPCION_PRODUCTO'].dropna().unique().tolist()
-                prods_sel = st.multiselect("Producto(s):", prods_disp)
+                prods_sel = st.multiselect("Producto(s):", df_analisis['DESCRIPCION_PRODUCTO'].dropna().unique().tolist())
             with col_param2:
                 min_date = df_analisis['FECHA_REGISTRO_DT'].min().date()
                 max_date = df_analisis['FECHA_REGISTRO_DT'].max().date()
-                rango_fechas_tabla = st.date_input("Rango de Fechas:", [min_date, max_date], min_value=min_date, max_value=max_date)
+                rango_fechas_tabla = st.date_input("Rango de Fechas:", [min_date, max_date], min_value=min_date, max_value=max_date, key="fechas_t")
 
-            submit_tabla = st.form_submit_button("📊 Calcular Promedios")
+            submit_tabla = st.form_submit_button("Calcular Promedios")
 
         if submit_tabla:
-            # Consolidamos las listas internamente de forma invisible para el usuario
             ubicaciones_sel_t = ["Dep: " + d for d in depas_sel_t] + ["Prov: " + p for p in provs_sel_t] + ["Dist: " + d for d in dists_sel_t]
             
             if ubicaciones_sel_t and prods_sel and len(rango_fechas_tabla) == 2:
                 start_date, end_date = rango_fechas_tabla
                 
                 with st.spinner("Calculando promedios por ubicación..."):
-                    df_tabla_list = []
+                    # Uso de la función refactorizada para mayor velocidad
+                    df_filtrado_tabla = filtrar_por_ubicacion(df_analisis, ubicaciones_sel_t)
                     
-                    for loc in ubicaciones_sel_t:
-                        if loc.startswith("Dep: "):
-                            temp_df = df_analisis[df_analisis['NOMDEPA'] == loc.replace("Dep: ", "")].copy()
-                        elif loc.startswith("Prov: "):
-                            temp_df = df_analisis[df_analisis['NOMPROV'] == loc.replace("Prov: ", "")].copy()
-                        elif loc.startswith("Dist: "):
-                            temp_df = df_analisis[df_analisis['NOMDIST'] == loc.replace("Dist: ", "")].copy()
-                        
-                        if not temp_df.empty:
-                            temp_df['UBICACION'] = loc
-                            df_tabla_list.append(temp_df)
-                            
-                    if df_tabla_list:
-                        df_filtrado_tabla = pd.concat(df_tabla_list, ignore_index=True)
-                        
+                    if not df_filtrado_tabla.empty:
                         mask_tabla = (
                             (df_filtrado_tabla['DESCRIPCION_PRODUCTO'].isin(prods_sel)) &
                             (df_filtrado_tabla['FECHA_REGISTRO_DT'].dt.date >= start_date) &
@@ -237,9 +242,7 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                             df_promedio = df_filtrado_tabla.groupby(
                                 ['FECHA_REGISTRO', 'FECHA_REGISTRO_DT', 'UBICACION', 'DESCRIPCION_PRODUCTO'], 
                                 observed=True
-                            ).agg(
-                                PRECIO_PROMEDIO=('PRECIO_VENTA', 'mean')
-                            ).reset_index()
+                            ).agg(PRECIO_PROMEDIO=('PRECIO_VENTA', 'mean')).reset_index()
                             
                             df_promedio = df_promedio.sort_values('FECHA_REGISTRO_DT').drop(columns=['FECHA_REGISTRO_DT'])
                             df_promedio = df_promedio[['FECHA_REGISTRO', 'UBICACION', 'DESCRIPCION_PRODUCTO', 'PRECIO_PROMEDIO']]
@@ -249,39 +252,27 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                             st.session_state['excel_promedio'] = convert_df_to_excel(df_promedio)
                         else:
                             st.session_state['df_promedio'] = None
-                            st.info("No hay datos para los productos y fechas seleccionados en esas ubicaciones.")
+                            st.info("No hay datos para los productos y fechas seleccionados.")
                     else:
                         st.session_state['df_promedio'] = None
-                        st.info("No se encontraron registros para las ubicaciones seleccionadas.")
+                        st.info("No se encontraron registros para las ubicaciones.")
             else:
-                st.warning("⚠️ Por favor, selecciona al menos una ubicación, un producto y verifica el rango de fechas.")
+                st.warning("⚠️ Selecciona al menos una ubicación, un producto y verifica las fechas.")
 
+        # UX MEJORA: Elementos relacionados juntos visualmente
         if 'df_promedio' in st.session_state and st.session_state['df_promedio'] is not None:
             st.dataframe(st.session_state['df_promedio'], use_container_width=True)
             
-            st.markdown("#### 📥 Descargar Tabla de Promedios")
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
-                st.download_button(
-                    label="Descargar Promedios (CSV)",
-                    data=st.session_state['csv_promedio'], 
-                    file_name="tabla_promedios_ubicaciones.csv",
-                    mime="text/csv",
-                    key="dl_prom_csv"
-                )
+                st.download_button("📥 Descargar Tabla (CSV)", st.session_state['csv_promedio'], "promedios.csv", "text/csv", key="dl_prom_csv")
             with col_dl2:
-                st.download_button(
-                    label="Descargar Promedios (Excel)",
-                    data=st.session_state['excel_promedio'], 
-                    file_name="tabla_promedios_ubicaciones.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="dl_prom_excel"
-                )
+                st.download_button("📥 Descargar Tabla (Excel)", st.session_state['excel_promedio'], "promedios.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_prom_excel")
 
-# === PESTAÑA 2: GRÁFICA ===
+    # === PESTAÑA 2: GRÁFICA ===
     with tab2:
         with st.form("form_filtros_grafica"):
-            st.markdown("**1. Selecciona las ubicaciones a comparar:**")
+            st.markdown("**A. Selecciona las ubicaciones a comparar:**")
             col_loc1, col_loc2, col_loc3 = st.columns(3)
             with col_loc1:
                 depas_sel_g = st.multiselect("Departamentos:", sorted(df_analisis['NOMDEPA'].dropna().unique()), key="dep_g")
@@ -290,44 +281,30 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
             with col_loc3:
                 dists_sel_g = st.multiselect("Distritos:", sorted(df_analisis['NOMDIST'].dropna().unique()), key="dist_g")
                 
-            st.markdown("**2. Selecciona parámetros de visualización:**")
+            st.markdown("**B. Selecciona parámetros de visualización:**")
             col_param1, col_param2, col_param3 = st.columns(3)
             with col_param1:
-                prods_disp_graf = df_analisis['DESCRIPCION_PRODUCTO'].dropna().unique().tolist()
-                prods_sel_graf = st.multiselect("Producto(s):", prods_disp_graf)
+                prods_sel_graf = st.multiselect("Producto(s):", df_analisis['DESCRIPCION_PRODUCTO'].dropna().unique().tolist(), key="prod_g")
             with col_param2:
-                rango_fechas_graf = st.date_input("Fechas del gráfico:", [min_date, max_date], min_value=min_date, max_value=max_date, key="fechas_graf")
+                rango_fechas_graf = st.date_input("Fechas:", [min_date, max_date], min_value=min_date, max_value=max_date, key="fechas_graf")
             with col_param3:
                 agrupacion = st.selectbox("Visualizar por:", ["Día", "Mes", "Trimestre", "Semestre", "Año"])
                 mapa_freq = {"Día": "D", "Mes": "ME", "Trimestre": "QE", "Semestre": "6ME", "Año": "YE"}
 
-            submit_grafica = st.form_submit_button("📈 Generar Gráfica")
+            submit_grafica = st.form_submit_button("Generar Gráfica")
 
         if submit_grafica:
-            ubicaciones_sel = ["Dep: " + d for d in depas_sel_g] + ["Prov: " + p for p in provs_sel_g] + ["Dist: " + d for d in dists_sel_g]
+            ubicaciones_sel_g = ["Dep: " + d for d in depas_sel_g] + ["Prov: " + p for p in provs_sel_g] + ["Dist: " + d for d in dists_sel_g]
             
-            if ubicaciones_sel and prods_sel_graf and len(rango_fechas_graf) == 2:
+            if ubicaciones_sel_g and prods_sel_graf and len(rango_fechas_graf) == 2:
                 start_date_g, end_date_g = rango_fechas_graf
                 freq = mapa_freq[agrupacion]
                 
                 with st.spinner("Analizando tendencias comparativas..."):
-                    df_plot_list = []
+                    # Uso de la función refactorizada
+                    df_filtrado_graf = filtrar_por_ubicacion(df_analisis, ubicaciones_sel_g)
                     
-                    for loc in ubicaciones_sel:
-                        if loc.startswith("Dep: "):
-                            temp_df = df_analisis[df_analisis['NOMDEPA'] == loc.replace("Dep: ", "")].copy()
-                        elif loc.startswith("Prov: "):
-                            temp_df = df_analisis[df_analisis['NOMPROV'] == loc.replace("Prov: ", "")].copy()
-                        elif loc.startswith("Dist: "):
-                            temp_df = df_analisis[df_analisis['NOMDIST'] == loc.replace("Dist: ", "")].copy()
-                        
-                        if not temp_df.empty:
-                            temp_df['LUGAR_COMPARACION'] = loc
-                            df_plot_list.append(temp_df)
-                    
-                    if df_plot_list:
-                        df_filtrado_graf = pd.concat(df_plot_list, ignore_index=True)
-                        
+                    if not df_filtrado_graf.empty:
                         mask_graf = (
                             (df_filtrado_graf['DESCRIPCION_PRODUCTO'].isin(prods_sel_graf)) &
                             (df_filtrado_graf['FECHA_REGISTRO_DT'].dt.date >= start_date_g) &
@@ -338,7 +315,7 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                         if not df_filtrado_graf.empty:
                             df_filtrado_graf.set_index('FECHA_REGISTRO_DT', inplace=True)
                             
-                            df_resampled = df_filtrado_graf.groupby(['LUGAR_COMPARACION', 'DESCRIPCION_PRODUCTO'], observed=True)['PRECIO_VENTA'].resample(freq).mean().reset_index()
+                            df_resampled = df_filtrado_graf.groupby(['UBICACION', 'DESCRIPCION_PRODUCTO'], observed=True)['PRECIO_VENTA'].resample(freq).mean().reset_index()
                             df_resampled.dropna(subset=['PRECIO_VENTA'], inplace=True)
                             
                             if agrupacion != "Día":
@@ -346,12 +323,12 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                             else:
                                 df_resampled['Periodo'] = df_resampled['FECHA_REGISTRO_DT']
 
-                            df_resampled['LEYENDA'] = df_resampled['LUGAR_COMPARACION'] + " | " + df_resampled['DESCRIPCION_PRODUCTO'].astype(str)
-                            df_resampled['PRECIO_LABEL'] = df_resampled['PRECIO_VENTA'].round(2)
+                            df_resampled['LEYENDA'] = df_resampled['UBICACION'] + " | " + df_resampled['DESCRIPCION_PRODUCTO'].astype(str)
+                            df_resampled['PRECIO_LABEL'] = df_resampled['PRECIO_VENTA'].round(2).astype(str) # Conversión a string para evitar errores en Plotly
 
                             fig = px.line(
                                 df_resampled, x='Periodo', y='PRECIO_VENTA', color='LEYENDA',
-                                markers=True, title="Evolución Comparativa de Precios por Ubicación"
+                                markers=True, text='PRECIO_LABEL', title="Evolución Comparativa de Precios"
                             )
                             
                             fig.update_traces(textposition="top center")
@@ -363,9 +340,9 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                             st.info("No hay datos para graficar en las fechas y productos seleccionados.")
                     else:
                         st.session_state['figura_grafica'] = None
-                        st.info("No se encontraron registros para las ubicaciones seleccionadas.")
+                        st.info("No se encontraron registros para las ubicaciones.")
             else:
-                st.warning("⚠️ Por favor, selecciona al menos un lugar, un producto y verifica las fechas.")
+                st.warning("⚠️ Selecciona al menos un lugar, un producto y verifica las fechas.")
 
         if 'figura_grafica' in st.session_state and st.session_state['figura_grafica'] is not None:
             st.plotly_chart(st.session_state['figura_grafica'], use_container_width=True)
