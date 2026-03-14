@@ -113,6 +113,10 @@ if uploaded_file is not None:
             try:
                 st.session_state['df_final'] = procesar_archivo(uploaded_file, uploaded_file.name, progress_bar, status_text)
                 st.session_state['procesado'] = True
+                
+                # --- NUEVO: Guardamos el nombre original ---
+                st.session_state['nombre_original'] = uploaded_file.name 
+                
                 status_text.success("¡Datos procesados con éxito!")
                 time.sleep(1.5) 
                 st.rerun()
@@ -139,23 +143,32 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
     columnas_exportacion = [col for col in df_analisis.columns if col != 'FECHA_REGISTRO_DT']
     df_para_exportar = df_analisis[columnas_exportacion]
     
-    with st.spinner("Preparando archivos organizados para descarga..."):
+    st.subheader("📥 1. Archivo Maestro Procesado")
+    columnas_exportacion = [col for col in df_analisis.columns if col != 'FECHA_REGISTRO_DT']
+    df_para_exportar = df_analisis[columnas_exportacion]
+    
+    with st.spinner("Preparando archivos procesados para descarga..."):
         csv_data = convert_df_to_csv(df_para_exportar)
         excel_data = convert_df_to_excel(df_para_exportar)
+    
+    # --- NUEVO: Construimos el nombre dinámico ---
+    nombre_base = st.session_state.get('nombre_original', 'archivo').rsplit('.', 1)[0]
+    nombre_csv = f"resultado_{nombre_base}.csv"
+    nombre_excel = f"resultado_{nombre_base}.xlsx"
     
     col_desc1, col_desc2 = st.columns(2)
     with col_desc1:
         st.download_button(
             label="Descargar Dataset (CSV)",
             data=csv_data,
-            file_name="dataset_procesado_interpolado.csv",
+            file_name=nombre_csv,
             mime="text/csv"
         )
     with col_desc2:
         st.download_button(
             label="Descargar Dataset (Excel)",
             data=excel_data,
-            file_name="dataset_procesado_interpolado.xlsx",
+            file_name=nombre_excel,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
