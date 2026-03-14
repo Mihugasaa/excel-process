@@ -11,18 +11,19 @@ st.set_page_config(page_title="Dashboard Analítico de Precios", layout="wide")
 st.title("Procesador y Dashboard de Precios")
 st.write("Sube tu archivo para estructurar los datos y explorar el comportamiento de los precios.")
 
+@st.cache_data(show_spinner=False)
 def convert_df_to_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Data')
     return output.getvalue()
 
+@st.cache_data(show_spinner=False)
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
-# --- FUNCIÓN DE PROCESAMIENTO CON BARRA DE PROGRESO ---
+# --- FUNCIÓN DE PROCESAMIENTO ---
 def procesar_archivo(file_buffer, file_name, progress_bar, status_text):
-    # --- FASE 1: Lectura ---
     status_text.text("Fase 1/5: Leyendo archivo...")
     if file_name.endswith('.csv'):
         df = pd.read_csv(file_buffer, encoding='utf-8', on_bad_lines='skip')
@@ -32,7 +33,6 @@ def procesar_archivo(file_buffer, file_name, progress_bar, status_text):
     columnas_originales = df.columns.tolist()
     progress_bar.progress(20)
 
-    # --- FASE 2: Optimización de Memoria ---
     status_text.text("Fase 2/5: Optimizando memoria del sistema...")
     columnas_texto = [
         'DESCRIPCION_ACTIVIDAD', 'CODIGO', 'CODIGO_OSINERG', 'NMBRE_UNDAD',
@@ -49,7 +49,6 @@ def procesar_archivo(file_buffer, file_name, progress_bar, status_text):
     df['orden_original'] = np.arange(len(df), dtype=np.float64)
     progress_bar.progress(40)
 
-    # --- FASE 3: Cálculo y Saltos Temporales ---
     status_text.text("Fase 3/5: Evaluando saltos temporales entre fechas...")
     columnas_sort = ['CODIGO_OSINERG', 'DESCRIPCION_PRODUCTO', 'FECHA_REGISTRO_DT', 'orden_original']
     df_sorted = df.sort_values(by=columnas_sort)
@@ -63,7 +62,6 @@ def procesar_archivo(file_buffer, file_name, progress_bar, status_text):
     gc.collect()
     progress_bar.progress(60)
 
-    # --- FASE 4: Interpolación (Máximo 15 días) ---
     status_text.text("Fase 4/5: Generando días faltantes...")
     if not gaps.empty:
         gaps['num_new_rows'] = (gaps['days_diff'] - 1).astype(np.float64).clip(upper=15).astype(np.int32)
@@ -93,7 +91,6 @@ def procesar_archivo(file_buffer, file_name, progress_bar, status_text):
     gc.collect()
     progress_bar.progress(80)
 
-    # --- FASE 5: Estructuración Final ---
     status_text.text("Fase 5/5: Ordenando y limpiando la estructura final...")
     df_final = df_final.sort_values(by=columnas_sort, ascending=[True, True, False, False]).reset_index(drop=True)
     df_final = df_final.drop(columns=['orden_original'], errors='ignore')
@@ -131,10 +128,8 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
     df_analisis = st.session_state['df_final']
     
     if st.button("🔄 Cargar un archivo nuevo"):
-        st.session_state['procesado'] = False
-        del st.session_state['df_final']
-        if 'df_promedio' in st.session_state: del st.session_state['df_promedio']
-        if 'df_grafica' in st.session_state: del st.session_state['df_grafica']
+        st.session_state.clear() # Limpiamos toda la sesión de forma segura
+        st.cache_data.clear() 
         gc.collect()
         st.rerun()
 
@@ -142,19 +137,24 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
     
     st.subheader("📥 1. Archivo Maestro Procesado")
     columnas_exportacion = [col for col in df_analisis.columns if col != 'FECHA_REGISTRO_DT']
+    df_para_exportar = df_analisis[columnas_exportacion]
+    
+    with st.spinner("Preparando archivos maestros para descarga..."):
+        csv_data = convert_df_to_csv(df_para_exportar)
+        excel_data = convert_df_to_excel(df_para_exportar)
     
     col_desc1, col_desc2 = st.columns(2)
     with col_desc1:
         st.download_button(
             label="Descargar Dataset (CSV - Rápido)",
-            data=convert_df_to_csv(df_analisis[columnas_exportacion]),
+            data=csv_data,
             file_name="dataset_procesado_interpolado.csv",
             mime="text/csv"
         )
     with col_desc2:
         st.download_button(
             label="Descargar Dataset (Excel - Lento)",
-            data=convert_df_to_excel(df_analisis[columnas_exportacion]),
+            data=excel_data,
             file_name="dataset_procesado_interpolado.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
@@ -184,7 +184,8 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
             if grifos_sel and prods_sel and len(rango_fechas_tabla) == 2:
                 start_date, end_date = rango_fechas_tabla
                 
-                with st.spinner("Calculando promedios..."):
+                # --- AQUÍ LA MEJORA: Calculamos todo dentro del spinner ---
+                with st.spinner("Calculando promedios y estructurando descargas..."):
                     mask_tabla = (
                         (df_analisis['CODIGO_OSINERG'].isin(grifos_sel)) & 
                         (df_analisis['DESCRIPCION_PRODUCTO'].isin(prods_sel)) &
@@ -202,24 +203,26 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                         df_promedio = df_promedio.sort_values('FECHA_REGISTRO_DT').drop(columns=['FECHA_REGISTRO_DT'])
                         df_promedio.rename(columns={'PRECIO_VENTA': 'PRECIO_PROMEDIO'}, inplace=True)
                         
+                        # Guardamos el DF y las descargas en memoria instantáneamente
                         st.session_state['df_promedio'] = df_promedio
+                        st.session_state['csv_promedio'] = convert_df_to_csv(df_promedio)
+                        st.session_state['excel_promedio'] = convert_df_to_excel(df_promedio)
                     else:
                         st.session_state['df_promedio'] = None
                         st.info("No hay datos para los filtros seleccionados.")
             else:
                 st.warning("⚠️ Por favor, selecciona al menos un grifo, un producto y verifica el rango de fechas.")
 
-        # Renderizamos la tabla y sus botones de descarga
+        # --- RENDERIZADO VISUAL INMEDIATO ---
         if 'df_promedio' in st.session_state and st.session_state['df_promedio'] is not None:
             st.dataframe(st.session_state['df_promedio'], use_container_width=True)
             
-            # --- NUEVOS BOTONES DE DESCARGA PARA LA TABLA DE PROMEDIOS ---
             st.markdown("#### 📥 Descargar Tabla de Promedios")
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
                 st.download_button(
                     label="Descargar Promedios (CSV)",
-                    data=convert_df_to_csv(st.session_state['df_promedio']),
+                    data=st.session_state['csv_promedio'], # Carga directa
                     file_name="tabla_promedios.csv",
                     mime="text/csv",
                     key="dl_prom_csv"
@@ -227,7 +230,7 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
             with col_dl2:
                 st.download_button(
                     label="Descargar Promedios (Excel)",
-                    data=convert_df_to_excel(st.session_state['df_promedio']),
+                    data=st.session_state['excel_promedio'], # Carga directa
                     file_name="tabla_promedios.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="dl_prom_excel"
@@ -256,7 +259,8 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                 start_date_g, end_date_g = rango_fechas_graf
                 freq = mapa_freq[agrupacion]
                 
-                with st.spinner("Dibujando la evolución de precios..."):
+                # --- AQUÍ LA MEJORA: Calculamos todo dentro del spinner ---
+                with st.spinner("Analizando tendencias y dibujando la evolución de precios..."):
                     mask_graf = (
                         (df_analisis['NOMDEPA'] == depa_sel) & 
                         (df_analisis['DESCRIPCION_PRODUCTO'].isin(prods_sel_graf)) &
@@ -275,17 +279,18 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                         else:
                             df_resampled['Periodo'] = df_resampled['FECHA_REGISTRO_DT']
 
-                        st.session_state['df_grafica'] = df_resampled
-                        st.session_state['titulo_grafica'] = f"Evolución del Precio Promedio en {depa_sel}"
+                        # Pre-calculamos la figura de Plotly para que el renderizado sea veloz
+                        fig = px.line(
+                            df_resampled, x='Periodo', y='PRECIO_VENTA', color='DESCRIPCION_PRODUCTO',
+                            markers=True, title=f"Evolución del Precio Promedio en {depa_sel}"
+                        )
+                        st.session_state['figura_grafica'] = fig
                     else:
-                        st.session_state['df_grafica'] = None
+                        st.session_state['figura_grafica'] = None
                         st.info("No hay datos para graficar con los parámetros seleccionados.")
             else:
                 st.warning("⚠️ Por favor, selecciona un departamento, producto(s) y verifica las fechas.")
 
-        if 'df_grafica' in st.session_state and st.session_state['df_grafica'] is not None:
-            fig = px.line(
-                st.session_state['df_grafica'], x='Periodo', y='PRECIO_VENTA', color='DESCRIPCION_PRODUCTO',
-                markers=True, title=st.session_state['titulo_grafica']
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        # --- RENDERIZADO VISUAL INMEDIATO ---
+        if 'figura_grafica' in st.session_state and st.session_state['figura_grafica'] is not None:
+            st.plotly_chart(st.session_state['figura_grafica'], use_container_width=True)
