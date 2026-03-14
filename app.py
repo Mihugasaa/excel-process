@@ -165,7 +165,6 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
 
     # === PESTAÑA 1: TABLA ===
     with tab1:
-        # Usamos un formulario para agrupar las selecciones
         with st.form("form_filtros_tabla"):
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -179,7 +178,6 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                 max_date = df_analisis['FECHA_REGISTRO_DT'].max().date()
                 rango_fechas_tabla = st.date_input("Rango de Fechas:", [min_date, max_date], min_value=min_date, max_value=max_date)
 
-            # Botón que detona la ejecución dentro del formulario
             submit_tabla = st.form_submit_button("📊 Calcular Promedios")
 
         if submit_tabla:
@@ -204,7 +202,6 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                         df_promedio = df_promedio.sort_values('FECHA_REGISTRO_DT').drop(columns=['FECHA_REGISTRO_DT'])
                         df_promedio.rename(columns={'PRECIO_VENTA': 'PRECIO_PROMEDIO'}, inplace=True)
                         
-                        # Guardamos en sesión para que no se borre al interactuar con otras cosas
                         st.session_state['df_promedio'] = df_promedio
                     else:
                         st.session_state['df_promedio'] = None
@@ -212,13 +209,32 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
             else:
                 st.warning("⚠️ Por favor, selecciona al menos un grifo, un producto y verifica el rango de fechas.")
 
-        # Renderizamos la tabla fuera del condicional del botón para mantenerla visible
+        # Renderizamos la tabla y sus botones de descarga
         if 'df_promedio' in st.session_state and st.session_state['df_promedio'] is not None:
             st.dataframe(st.session_state['df_promedio'], use_container_width=True)
+            
+            # --- NUEVOS BOTONES DE DESCARGA PARA LA TABLA DE PROMEDIOS ---
+            st.markdown("#### 📥 Descargar Tabla de Promedios")
+            col_dl1, col_dl2 = st.columns(2)
+            with col_dl1:
+                st.download_button(
+                    label="Descargar Promedios (CSV)",
+                    data=convert_df_to_csv(st.session_state['df_promedio']),
+                    file_name="tabla_promedios.csv",
+                    mime="text/csv",
+                    key="dl_prom_csv"
+                )
+            with col_dl2:
+                st.download_button(
+                    label="Descargar Promedios (Excel)",
+                    data=convert_df_to_excel(st.session_state['df_promedio']),
+                    file_name="tabla_promedios.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_prom_excel"
+                )
 
     # === PESTAÑA 2: GRÁFICA ===
     with tab2:
-        # Usamos otro formulario para la gráfica
         with st.form("form_filtros_grafica"):
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -259,7 +275,6 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                         else:
                             df_resampled['Periodo'] = df_resampled['FECHA_REGISTRO_DT']
 
-                        # Guardamos los datos procesados de la gráfica en sesión
                         st.session_state['df_grafica'] = df_resampled
                         st.session_state['titulo_grafica'] = f"Evolución del Precio Promedio en {depa_sel}"
                     else:
@@ -268,7 +283,6 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
             else:
                 st.warning("⚠️ Por favor, selecciona un departamento, producto(s) y verifica las fechas.")
 
-        # Renderizamos la gráfica fuera del condicional del botón
         if 'df_grafica' in st.session_state and st.session_state['df_grafica'] is not None:
             fig = px.line(
                 st.session_state['df_grafica'], x='Periodo', y='PRECIO_VENTA', color='DESCRIPCION_PRODUCTO',
