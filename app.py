@@ -70,7 +70,14 @@ def procesar_archivo(file_buffer, file_name, progress_bar, status_text):
     if 'PRECIO_VENTA' in df.columns:
         df['PRECIO_VENTA'] = pd.to_numeric(df['PRECIO_VENTA'], errors='coerce')
     
-    df['FECHA_REGISTRO_DT'] = pd.to_datetime(df['FECHA_REGISTRO'], format='%d/%m/%Y', errors='coerce')
+    # 1. Convertimos a datetime de forma flexible indicando que el día va primero (dayfirst=True)
+    # 2. Usamos .dt.normalize() para eliminar las horas, minutos y segundos de raíz
+    df['FECHA_REGISTRO_DT'] = pd.to_datetime(df['FECHA_REGISTRO'], dayfirst=True, errors='coerce').dt.normalize()
+    
+    # 3. Sobrescribimos la columna original para que visualmente también pierda la hora
+    # Esto asegura que el groupby() agrupe todo el día correctamente
+    df['FECHA_REGISTRO'] = df['FECHA_REGISTRO_DT'].dt.strftime('%d/%m/%Y')
+    
     df['orden_original'] = np.arange(len(df), dtype=np.float64)
     progress_bar.progress(40)
 
