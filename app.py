@@ -251,7 +251,7 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                         # Si seleccionó nacional, le asignamos la etiqueta a todo el DF base
                         if nacional_t:
                             temp_nac = df_base.copy()
-                            temp_nac['UBICACION'] = "🇵🇪 Nacional"
+                            temp_nac['UBICACION'] = "Nacional"
                             df_tabla_list.append(temp_nac)
                             
                         # Agregamos las otras ubicaciones seleccionadas
