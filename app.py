@@ -24,7 +24,6 @@ def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
 def filtrar_por_ubicacion(df, lista_ubicaciones):
-    """Optimización (Data Science): Filtra vectorialmente en lugar de hacer múltiples copies en un for-loop."""
     depas = [loc.replace("Dep: ", "") for loc in lista_ubicaciones if loc.startswith("Dep: ")]
     provs = [loc.replace("Prov: ", "") for loc in lista_ubicaciones if loc.startswith("Prov: ")]
     dists = [loc.replace("Dist: ", "") for loc in lista_ubicaciones if loc.startswith("Dist: ")]
@@ -75,7 +74,6 @@ def procesar_archivo(file_buffer, file_name, progress_bar, status_text):
     df['FECHA_REGISTRO_DT'] = pd.to_datetime(df['FECHA_REGISTRO'], dayfirst=True, errors='coerce').dt.normalize()
     
     # 3. Sobrescribimos la columna original para que visualmente también pierda la hora
-    # Esto asegura que el groupby() agrupe todo el día correctamente
     df['FECHA_REGISTRO'] = df['FECHA_REGISTRO_DT'].dt.strftime('%d/%m/%Y')
     
     df['orden_original'] = np.arange(len(df), dtype=np.float64)
@@ -207,7 +205,11 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
     # === PESTAÑA 1: TABLA ===
     with tab1:
         with st.form("form_filtros_tabla"):
-            st.markdown("**A. Selecciona las ubicaciones:**")
+            st.markdown("**A. Selecciona las ubicaciones a analizar:**")
+            
+            # UX: Checkbox destacado para nivel nacional
+            nacional_t = st.checkbox("🇵🇪 **Nivel Nacional**", key="nac_t")
+            
             col_loc1, col_loc2, col_loc3 = st.columns(3)
             with col_loc1:
                 depas_sel_t = st.multiselect("Departamentos:", sorted(df_analisis['NOMDEPA'].dropna().unique()))
@@ -230,28 +232,52 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
         if submit_tabla:
             ubicaciones_sel_t = ["Dep: " + d for d in depas_sel_t] + ["Prov: " + p for p in provs_sel_t] + ["Dist: " + d for d in dists_sel_t]
             
-            if ubicaciones_sel_t and prods_sel and len(rango_fechas_tabla) == 2:
+            # Validación: Debe haber elegido al menos el Nacional o alguna ubicación
+            if (nacional_t or ubicaciones_sel_t) and prods_sel and len(rango_fechas_tabla) == 2:
                 start_date, end_date = rango_fechas_tabla
                 
                 with st.spinner("Calculando promedios por ubicación..."):
-                    # Uso de la función refactorizada para mayor velocidad
-                    df_filtrado_tabla = filtrar_por_ubicacion(df_analisis, ubicaciones_sel_t)
+                    df_tabla_list = []
                     
-                    if not df_filtrado_tabla.empty:
-                        mask_tabla = (
-                            (df_filtrado_tabla['DESCRIPCION_PRODUCTO'].isin(prods_sel)) &
-                            (df_filtrado_tabla['FECHA_REGISTRO_DT'].dt.date >= start_date) &
-                            (df_filtrado_tabla['FECHA_REGISTRO_DT'].dt.date <= end_date)
-                        )
-                        df_filtrado_tabla = df_filtrado_tabla[mask_tabla]
-                        
-                        if not df_filtrado_tabla.empty:
-                            df_promedio = df_filtrado_tabla.groupby(
+                    # Filtramos por fecha y producto una sola vez para ahorrar memoria
+                    mask_base = (
+                        (df_analisis['DESCRIPCION_PRODUCTO'].isin(prods_sel)) &
+                        (df_analisis['FECHA_REGISTRO_DT'].dt.date >= start_date) &
+                        (df_analisis['FECHA_REGISTRO_DT'].dt.date <= end_date)
+                    )
+                    df_base = df_analisis[mask_base].copy()
+                    
+                    if not df_base.empty:
+                        # Si seleccionó nacional, le asignamos la etiqueta a todo el DF base
+                        if nacional_t:
+                            temp_nac = df_base.copy()
+                            temp_nac['UBICACION'] = "🇵🇪 Nacional"
+                            df_tabla_list.append(temp_nac)
+                            
+                        # Agregamos las otras ubicaciones seleccionadas
+                        if ubicaciones_sel_t:
+                            df_locs = filtrar_por_ubicacion(df_base, ubicaciones_sel_t)
+                            if not df_locs.empty:
+                                df_tabla_list.append(df_locs)
+                                
+                        if df_tabla_list:
+                            df_combinado = pd.concat(df_tabla_list, ignore_index=True)
+                            
+                            # --- DATA SCIENCE: EL DOBLE PROMEDIO (Promedio Equitativo) ---
+                            # Paso 1: Calculamos el promedio diario interno por cada Grifo
+                            df_grifos = df_combinado.groupby(
+                                ['FECHA_REGISTRO', 'FECHA_REGISTRO_DT', 'UBICACION', 'DESCRIPCION_PRODUCTO', 'CODIGO_OSINERG'], 
+                                observed=True
+                            )['PRECIO_VENTA'].mean().reset_index()
+                            
+                            # Paso 2: Calculamos el promedio diario general de esos grifos
+                            df_promedio = df_grifos.groupby(
                                 ['FECHA_REGISTRO', 'FECHA_REGISTRO_DT', 'UBICACION', 'DESCRIPCION_PRODUCTO'], 
                                 observed=True
                             ).agg(PRECIO_PROMEDIO=('PRECIO_VENTA', 'mean')).reset_index()
+                            # -------------------------------------------------------------
                             
-                            df_promedio = df_promedio.sort_values('FECHA_REGISTRO_DT').drop(columns=['FECHA_REGISTRO_DT'])
+                            df_promedio = df_promedio.sort_values(['FECHA_REGISTRO_DT', 'UBICACION']).drop(columns=['FECHA_REGISTRO_DT'])
                             df_promedio = df_promedio[['FECHA_REGISTRO', 'UBICACION', 'DESCRIPCION_PRODUCTO', 'PRECIO_PROMEDIO']]
                             
                             st.session_state['df_promedio'] = df_promedio
@@ -259,14 +285,13 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                             st.session_state['excel_promedio'] = convert_df_to_excel(df_promedio)
                         else:
                             st.session_state['df_promedio'] = None
-                            st.info("No hay datos para los productos y fechas seleccionados.")
+                            st.info("No hay datos para los productos y fechas seleccionados en esas ubicaciones.")
                     else:
                         st.session_state['df_promedio'] = None
-                        st.info("No se encontraron registros para las ubicaciones.")
+                        st.info("No se encontraron registros en la base para esos filtros.")
             else:
                 st.warning("⚠️ Selecciona al menos una ubicación, un producto y verifica las fechas.")
 
-        # UX MEJORA: Elementos relacionados juntos visualmente
         if 'df_promedio' in st.session_state and st.session_state['df_promedio'] is not None:
             st.dataframe(st.session_state['df_promedio'], use_container_width=True)
             
@@ -280,6 +305,10 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
     with tab2:
         with st.form("form_filtros_grafica"):
             st.markdown("**A. Selecciona las ubicaciones a comparar:**")
+            
+            # UX: Checkbox destacado para nivel nacional en la gráfica también
+            nacional_g = st.checkbox("🇵🇪 **Nivel Nacional** (Promedio de todo el país)", key="nac_g")
+            
             col_loc1, col_loc2, col_loc3 = st.columns(3)
             with col_loc1:
                 depas_sel_g = st.multiselect("Departamentos:", sorted(df_analisis['NOMDEPA'].dropna().unique()), key="dep_g")
@@ -303,26 +332,49 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
         if submit_grafica:
             ubicaciones_sel_g = ["Dep: " + d for d in depas_sel_g] + ["Prov: " + p for p in provs_sel_g] + ["Dist: " + d for d in dists_sel_g]
             
-            if ubicaciones_sel_g and prods_sel_graf and len(rango_fechas_graf) == 2:
+            if (nacional_g or ubicaciones_sel_g) and prods_sel_graf and len(rango_fechas_graf) == 2:
                 start_date_g, end_date_g = rango_fechas_graf
                 freq = mapa_freq[agrupacion]
                 
-                with st.spinner("Analizando tendencias comparativas..."):
-                    # Uso de la función refactorizada
-                    df_filtrado_graf = filtrar_por_ubicacion(df_analisis, ubicaciones_sel_g)
+                with st.spinner("Analizando tendencias comparativas equitativas..."):
+                    df_plot_list = []
                     
-                    if not df_filtrado_graf.empty:
-                        mask_graf = (
-                            (df_filtrado_graf['DESCRIPCION_PRODUCTO'].isin(prods_sel_graf)) &
-                            (df_filtrado_graf['FECHA_REGISTRO_DT'].dt.date >= start_date_g) &
-                            (df_filtrado_graf['FECHA_REGISTRO_DT'].dt.date <= end_date_g)
-                        )
-                        df_filtrado_graf = df_filtrado_graf[mask_graf]
-                        
-                        if not df_filtrado_graf.empty:
-                            df_filtrado_graf.set_index('FECHA_REGISTRO_DT', inplace=True)
+                    mask_base_g = (
+                        (df_analisis['DESCRIPCION_PRODUCTO'].isin(prods_sel_graf)) &
+                        (df_analisis['FECHA_REGISTRO_DT'].dt.date >= start_date_g) &
+                        (df_analisis['FECHA_REGISTRO_DT'].dt.date <= end_date_g)
+                    )
+                    df_base_g = df_analisis[mask_base_g].copy()
+                    
+                    if not df_base_g.empty:
+                        if nacional_g:
+                            temp_nac_g = df_base_g.copy()
+                            temp_nac_g['UBICACION'] = "🇵🇪 Nacional"
+                            df_plot_list.append(temp_nac_g)
                             
-                            df_resampled = df_filtrado_graf.groupby(['UBICACION', 'DESCRIPCION_PRODUCTO'], observed=True)['PRECIO_VENTA'].resample(freq).mean().reset_index()
+                        if ubicaciones_sel_g:
+                            df_locs_g = filtrar_por_ubicacion(df_base_g, ubicaciones_sel_g)
+                            if not df_locs_g.empty:
+                                df_plot_list.append(df_locs_g)
+                                
+                        if df_plot_list:
+                            df_combinado_g = pd.concat(df_plot_list, ignore_index=True)
+                            
+                            # --- DATA SCIENCE: EL DOBLE PROMEDIO PARA LA GRÁFICA ---
+                            # Paso 1: Promedio por Grifo en ese día
+                            df_grifos_g = df_combinado_g.groupby(
+                                ['FECHA_REGISTRO_DT', 'UBICACION', 'DESCRIPCION_PRODUCTO', 'CODIGO_OSINERG'], 
+                                observed=True
+                            )['PRECIO_VENTA'].mean().reset_index()
+                            
+                            # Paso 2: Usamos el resample para calcular el promedio de los grifos en la frecuencia deseada
+                            df_grifos_g.set_index('FECHA_REGISTRO_DT', inplace=True)
+                            df_resampled = df_grifos_g.groupby(
+                                ['UBICACION', 'DESCRIPCION_PRODUCTO'], 
+                                observed=True
+                            )['PRECIO_VENTA'].resample(freq).mean().reset_index()
+                            # --------------------------------------------------------
+                            
                             df_resampled.dropna(subset=['PRECIO_VENTA'], inplace=True)
                             
                             if agrupacion != "Día":
@@ -331,11 +383,11 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                                 df_resampled['Periodo'] = df_resampled['FECHA_REGISTRO_DT']
 
                             df_resampled['LEYENDA'] = df_resampled['UBICACION'] + " | " + df_resampled['DESCRIPCION_PRODUCTO'].astype(str)
-                            df_resampled['PRECIO_LABEL'] = df_resampled['PRECIO_VENTA'].round(2).astype(str) # Conversión a string para evitar errores en Plotly
+                            df_resampled['PRECIO_LABEL'] = df_resampled['PRECIO_VENTA'].round(2).astype(str)
 
                             fig = px.line(
                                 df_resampled, x='Periodo', y='PRECIO_VENTA', color='LEYENDA',
-                                markers=True, text='PRECIO_LABEL', title="Evolución Comparativa de Precios"
+                                markers=True, text='PRECIO_LABEL', title="Evolución Comparativa de Precios (Promedio Equitativo)"
                             )
                             
                             fig.update_traces(textposition="top center")
@@ -347,9 +399,9 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
                             st.info("No hay datos para graficar en las fechas y productos seleccionados.")
                     else:
                         st.session_state['figura_grafica'] = None
-                        st.info("No se encontraron registros para las ubicaciones.")
+                        st.info("No se encontraron registros en la base para esos filtros.")
             else:
-                st.warning("⚠️ Selecciona al menos un lugar, un producto y verifica las fechas.")
+                st.warning("⚠️ Selecciona al menos un lugar (o Nivel Nacional), un producto y verifica las fechas.")
 
         if 'figura_grafica' in st.session_state and st.session_state['figura_grafica'] is not None:
             st.plotly_chart(st.session_state['figura_grafica'], use_container_width=True)
