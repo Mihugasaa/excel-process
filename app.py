@@ -307,7 +307,7 @@ if st.session_state.get('procesado', False) and 'df_final' in st.session_state:
             st.markdown("**A. Selecciona las ubicaciones a comparar:**")
             
             # UX: Checkbox destacado para nivel nacional en la gráfica también
-            nacional_g = st.checkbox("**Nivel Nacional** (Promedio de todo el país)", key="nac_g")
+            nacional_g = st.checkbox("**Nivel Nacional**", key="nac_g")
             
             col_loc1, col_loc2, col_loc3 = st.columns(3)
             with col_loc1:
